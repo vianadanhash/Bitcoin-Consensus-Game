@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin Class: El Consenso</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+
+    <style>
+        body { font-family: 'Press Start 2P', cursive; background-color: #0f172a; color: white; image-rendering: pixelated; }
+        .pixel-border { border: 4px solid #fff; box-shadow: 6px 6px 0px #000; }
+        .btn-pixel:active { transform: translate(4px, 4px); box-shadow: 0px 0px 0px; }
+        /* Scrollbar estilo retro */
+        ::-webkit-scrollbar { width: 10px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #fbbf24; border: 2px solid #000; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <header class="text-center mb-8">
+        <h1 class="text-xl md:text-3xl text-yellow-400 mb-4 tracking-tighter">BITCOIN CLASS: CONSENSO</h1>
+        <div id="status-ronda" class="bg-red-600 inline-block px-4 py-2 text-[10px] pixel-border border-black">
+            RONDA 1: MODO CENTRALIZADO (ESPERANDO AL CONTADOR)
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+        
+        <div class="bg-blue-900 p-6 pixel-border border-blue-400">
+            <h2 class="text-[10px] text-blue-300 mb-4">MI BILLETERA</h2>
+            <div class="flex items-center space-x-4">
+                <div class="w-16 h-16 bg-gray-800 border-2 border-white flex items-center justify-center text-2xl">👾</div>
+                <div>
+                    <p class="text-[10px] text-gray-300" id="my-name">Cargando...</p>
+                    <p class="text-xl text-green-400 mt-2" id="my-balance">0 BTC</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-gray-800 p-6 pixel-border border-yellow-500">
+            <h2 class="text-[10px] text-yellow-400 mb-4">ENVIAR MONEDAS</h2>
+            <div class="space-y-4">
+                <select id="destinatario" class="w-full bg-black border-2 border-gray-600 p-3 text-[10px] text-white outline-none">
+                    <option value="">Cargando alumnos...</option>
+                </select>
+                <input id="monto" type="number" placeholder="CANTIDAD" class="w-full bg-black border-2 border-gray-600 p-3 text-[10px] text-white outline-none">
+                <button onclick="enviarTransaccion()" class="w-full bg-green-600 hover:bg-green-500 p-3 text-[10px] btn-pixel text-white font-bold border-2 border-black shadow-[4px_4px_0px_#000]">
+                    ENVIAR AL LIBRO
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-black p-6 pixel-border border-purple-500">
+            <h2 class="text-[10px] text-purple-400 mb-4">LIBRO PÚBLICO (MEMPOOL)</h2>
+            <div id="ledger" class="space-y-4 h-64 overflow-y-auto pr-2 text-[8px]">
+                </div>
+        </div>
+    </div>
+
+    <div id="panel-profe" class="mt-8 text-center hidden">
+        <button onclick="cambiarRonda(1)" class="bg-red-700 p-2 text-[8px] mx-2 pixel-border border-black hover:bg-red-600">Ronda 1</button>
+        <button onclick="cambiarRonda(2)" class="bg-purple-700 p-2 text-[8px] mx-2 pixel-border border-black hover:bg-purple-600">Ronda 2</button>
+        <button onclick="limpiarDatos()" class="bg-gray-700 p-2 text-[8px] mx-2 pixel-border border-black hover:bg-gray-600">Borrar Todo</button>
+    </div>
+
+    <script>
+        // ==========================================================
+        // === PEGA AQUÍ TU FIREBASECONFIG REEMPLAZANDO ESTE BLOQUE ===
+        const firebaseConfig = {
+            apiKey: "AIzaSyBJGxv-FEAn6G58GnuTjrls_0ovn4WCN7Q",
+            authDomain: "bitcoinclassconsensus.firebaseapp.com",
+            databaseURL: "https://bitcoinclassconsensus-default-rtdb.firebaseio.com",
+            projectId: "bitcoinclassconsensus",
+            storageBucket: "bitcoinclassconsensus.firebasestorage.app",
+            messagingSenderId: "890839108801",
+            appId: "1:890839108801:web:c336f917c8d43ca5549840"
+        };
+        // ==========================================================
+
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        // Variables de usuario
+        let myName = prompt("¿Cuál es tu nombre? (Si eres el profesor, escribe 'Profe')") || "Anon" + Math.floor(Math.random()*100);
+        let myId = myName.toLowerCase().replace(/\s/g, ''); 
+        let currentRound = 1;
+
+        // Mostrar panel de profe si aplica
+        if(myId === 'profe' || myId === 'profesor') {
+            document.getElementById('panel-profe').classList.remove('hidden');
+        }
+
+        document.getElementById('my-name').innerText = myName;
+
+        // 1. REGISTRAR USUARIO Y SALDO INICIAL
+        const userRef = db.ref('users/' + myId);
+        userRef.once('value', snapshot => {
+            if(!snapshot.exists()) {
+                userRef.set({ nombre: myName, saldo: Math.floor(Math.random() * 400) + 100 });
+            }
+        });
+
+        // 2. ESCUCHAR CAMBIOS EN MI SALDO
+        userRef.on('value', snapshot => {
+            if(snapshot.exists()) {
+                document.getElementById('my-balance').innerText = snapshot.val().saldo + " BTC";
+            }
+        });
+
+        // 3. ACTUALIZAR LISTA DE DESTINATARIOS
+        db.ref('users').on('value', snapshot => {
+            const select = document.getElementById('destinatario');
+            select.innerHTML = '<option value="">Seleccionar receptor...</option>';
+            snapshot.forEach(child => {
+                if(child.key !== myId) {
+                    select.innerHTML += `<option value="${child.key}">${child.val().nombre}</option>`;
+                }
+            });
+        });
+
+        // 4. ESCUCHAR RONDA ACTUAL
+        db.ref('estado/ronda').on('value', snapshot => {
+            currentRound = snapshot.val() || 1;
+            const statusDiv = document.getElementById('status-ronda');
+            if(currentRound === 1) {
+                statusDiv.innerText = "RONDA 1: CONTADOR CENTRAL";
+                statusDiv.className = "bg-red-600 inline-block px-4 py-2 text-[10px] pixel-border border-black";
+            } else {
+                statusDiv.innerText = "RONDA 2: CONSENSO DESCENTRALIZADO";
+                statusDiv.className = "bg-purple-600 inline-block px-4 py-2 text-[10px] pixel-border border-black";
+            }
+        });
+
+        // 5. ENVIAR TRANSACCION AL MEMPOOL
+        function enviarTransaccion() {
+            const dest = document.getElementById('destinatario').value;
+            const monto = parseInt(document.getElementById('monto').value);
+            
+            if(!dest || !monto || monto <= 0) return alert("Datos inválidos");
+
+            const txId = Date.now();
+            db.ref('transactions/' + txId).set({
+                de: myId,
+                deNombre: myName,
+                para: dest,
+                monto: monto,
+                estado: 'pendiente',
+                votosFavor: 0
+            });
+            document.getElementById('monto').value = '';
+        }
+
+        // 6. ACTUALIZAR LIBRO CONTABLE (LEDGER)
+        db.ref('transactions').on('value', snapshot => {
+            const ledger = document.getElementById('ledger');
+            ledger.innerHTML = '';
+            
+            snapshot.forEach(child => {
+                const tx = child.val();
+                const txId = child.key;
+                
+                let colorBorder = tx.estado === 'aprobada' ? 'border-green-500' : (tx.estado === 'rechazada' ? 'border-red-500' : 'border-yellow-500');
+                let estadoTexto = tx.estado.toUpperCase();
+
+                let html = `
+                    <div class="border-l-4 ${colorBorder} pl-3 py-2 bg-gray-900 mb-2">
+                        <p class="text-gray-400 mb-1">TX#${txId.toString().slice(-4)} - [${estadoTexto}]</p>
+                        <p class="text-white">${tx.deNombre} ➔ <span class="text-blue-300">${tx.para}</span> : <span class="text-green-400">${tx.monto} BTC</span></p>
+                `;
+
+                // Botones de acción (Aprobar/Rechazar)
+                if (tx.estado === 'pendiente') {
+                    if (currentRound === 1 && (myId === 'profe' || myId === 'profesor')) {
+                        // Ronda 1: Solo el profe aprueba
+                        html += `
+                            <div class="mt-2 flex space-x-2">
+                                <button onclick="resolverTx('${txId}', 'aprobada', '${tx.de}', '${tx.para}', ${tx.monto})" class="bg-green-700 px-2 py-1 hover:bg-green-600 border border-black">APROBAR</button>
+                                <button onclick="resolverTx('${txId}', 'rechazada', null, null, null)" class="bg-red-700 px-2 py-1 hover:bg-red-600 border border-black">RECHAZAR</button>
+                            </div>`;
+                    } else if (currentRound === 2) {
+                        // Ronda 2: Todos pueden votar
+                        html += `
+                            <div class="mt-2 flex items-center space-x-2">
+                                <button onclick="votarTx('${txId}')" class="bg-blue-700 px-2 py-1 hover:bg-blue-600 border border-black">👍 VOTAR A FAVOR</button>
+                                <span class="text-gray-400">Votos: ${tx.votosFavor || 0}</span>
+                            </div>`;
+                    } else {
+                        html += `<p class="mt-2 text-gray-500 italic">Esperando validación...</p>`;
+                    }
+                }
+                html += `</div>`;
+                // Insertar al principio para ver las más nuevas arriba
+                ledger.insertAdjacentHTML('afterbegin', html); 
+            });
+        });
+
+        // 7. FUNCIONES DE LÓGICA DE SALDOS Y VOTOS
+        function resolverTx(txId, decision, deId, paraId, monto) {
+            if(decision === 'aprobada') {
+                // Restar al emisor
+                db.ref('users/' + deId + '/saldo').transaction(saldo => (saldo || 0) - monto);
+                // Sumar al receptor
+                db.ref('users/' + paraId + '/saldo').transaction(saldo => (saldo || 0) + monto);
+            }
+            db.ref('transactions/' + txId).update({ estado: decision });
+        }
+
+        function votarTx(txId) {
+            // Simulador de votos (Para simplificar en clase, cada clic suma un voto)
+            const txRef = db.ref('transactions/' + txId);
+            txRef.transaction(tx => {
+                if(tx && tx.estado === 'pendiente') {
+                    tx.votosFavor = (tx.votosFavor || 0) + 1;
+                    // Si llega a 3 votos (puedes cambiar esto según tus alumnos), se aprueba sola
+                    if(tx.votosFavor >= 3) {
+                        tx.estado = 'aprobada';
+                        // Actualizar saldos
+                        db.ref('users/' + tx.de + '/saldo').transaction(saldo => (saldo || 0) - tx.monto);
+                        db.ref('users/' + tx.para + '/saldo').transaction(saldo => (saldo || 0) + tx.monto);
+                    }
+                }
+                return tx;
+            });
+        }
+
+        // 8. FUNCIONES DEL PROFESOR
+        function cambiarRonda(num) { db.ref('estado/ronda').set(num); }
+        function limpiarDatos() { 
+            if(confirm("¿Borrar todas las transacciones y usuarios?")) {
+                db.ref('transactions').remove();
+                db.ref('users').remove();
+                location.reload();
+            }
+        }
+    </script>
+</body>
+</html>
